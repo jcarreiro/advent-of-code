@@ -177,7 +177,6 @@ class ImageGrid(object):
     def pen_up(self):
         self.pen_state = Grid.PenState.UP
 
-    @profile
     def adjust_bounds(self, new_bounds: Bounds):
         # We don't handle shrinking the bounds ATM.
         assert(new_bounds.left <= self.bounds.left)
@@ -225,7 +224,6 @@ class ImageGrid(object):
         # if s == "q" or s == "Q":
         #     exit()
 
-    @profile
     def move_to(self, p: Point):
         print(f"Move to {p} from {self.pen_pos}, pen state is {self.pen_state}.")
 
@@ -300,7 +298,6 @@ def wire_directions_to_points(directions):
         points.append(p)
     return points
 
-@profile
 def draw_wires(wires, path=None):
     # For some reason repeatedly adjusting the bounds of the np.array which
     # backs the ImageGrid (using hstack and vstack) "leaks" a lot of memory
@@ -342,25 +339,23 @@ def draw_wires(wires, path=None):
 def manhattan_dist(p0: Point, p1: Point):
     return abs(p1.x - p0.x) + abs(p1.y - p0.y)
 
-def solve_part1(wires):
-    Segment = namedtuple("Segment", ["x0", "y0", "x1", "y1"])
+Segment = namedtuple("Segment", ["x0", "y0", "x1", "y1", "start_length"])
 
-    def convert_wire(wire):
-        segments = []
-        pos = Point(0, 0)
-        for inst in wire:
-            new_pos = wire_direction_to_position(pos, inst)
-            # segments must be horizontal or vertical
-            assert((pos.x == new_pos.x and pos.y != new_pos.y) or
-                   (pos.x != new_pos.x and pos.y == new_pos.y))
-            x0 = min(pos.x, new_pos.x)
-            x1 = max(pos.x, new_pos.x)
-            y0 = min(pos.y, new_pos.y)
-            y1 = max(pos.y, new_pos.y)
-            segments.append(Segment(x0, y0, x1, y1))
-            pos = new_pos
-        return segments
+def convert_wire(wire):
+    segments = []
+    pos = Point(0, 0)
+    length = 0
+    for inst in wire:
+        new_pos = wire_direction_to_position(pos, inst)
+        # segments must be horizontal or vertical
+        assert((pos.x == new_pos.x and pos.y != new_pos.y) or
+               (pos.x != new_pos.x and pos.y == new_pos.y))
+        segments.append(Segment(pos.x, pos.y, new_pos.x, new_pos.y, length))
+        length += abs(new_pos.x - pos.x) + abs(new_pos.y - pos.y)
+        pos = new_pos
+    return segments
 
+def solve(wires, handle_intersection):
     wires = list(map(convert_wire, wires))
     assert(len(wires) == 2)
     print(wires)
@@ -369,86 +364,143 @@ def solve_part1(wires):
     vs = sorted(filter(lambda s: s.x0 == s.x1, wires[1]), key=lambda s: s.x0)
     print(hs, vs)
 
-    min_distance = None
-    best_intersection = Point(0, 0)
     for s0 in wires[0]:
         print(f"Checking segment {s0}.")
-        if s0.x0 == s0.x1:
-            print(f"  Segment is vertical (x = {s0.x0}).")
+        # We need the x and y coordinates to be ordered ascending for the
+        # intersection test.
+        s0x0 = min(s0.x0, s0.x1)
+        s0x1 = max(s0.x0, s0.x1)
+        s0y0 = min(s0.y0, s0.y1)
+        s0y1 = max(s0.y0, s0.y1)
+        if s0x0 == s0x1:
+            s0x = s0x0
+            print(f"  Segment is vertical (x = {s0x}).")
             for s1 in hs:
-                assert(s1.y0 == s1.y1)
+                s1x0 = min(s1.x0, s1.x1)
+                s1x1 = max(s1.x0, s1.x1)
+                s1y0 = min(s1.y0, s1.y1)
+                s1y1 = max(s1.y0, s1.y1)
+                assert(s1y0 == s1y1)
+                s1y = s1y0
                 print(f"  Comparing to segment {s1}.")
-                if s1.y0 < s0.y0:
+                if s1y < s0y0:
                     # h seg is below us
                     print("  Segment below, continuing.")
                     continue
-                elif s1.y0 >= s0.y0 and s1.y0 <= s0.y1:
+                elif s1y >= s0y0 and s1y <= s0y1:
                     # h seg inside our bounds, check other coord
                     print("  Possible match.")
-                    if s1.x0 <= s0.x0 and s1.x1 >= s0.x0:
-                        p = Point(s0.x0, s1.y0)
-                        d = manhattan_dist(p, Point(0, 0))
-                        print("  Intersection found at point {p}, Manhattan distance {d}.")
-                        if not min_distance or d < min_distance:
-                            best_intersection = p
-                            min_distance = d
+                    if s1x0 <= s0x and s1x1 >= s0x:
+                        handle_intersection(Point(s0x, s1y), s0, s1)
                 else:
                     # h seg must be above us
                     print("  Segment above, breaking loop.")
                     break
-        elif s0.y0 == s0.y1:
-            print(f"  Segment is horizontal (y = {s0.y0}).")
+        elif s0y0 == s0y1:
+            s0y = s0y0
+            print(f"  Segment is horizontal (y = {s0y}).")
             for s1 in vs:
+                s1x0 = min(s1.x0, s1.x1)
+                s1x1 = max(s1.x0, s1.x1)
+                s1y0 = min(s1.y0, s1.y1)
+                s1y1 = max(s1.y0, s1.y1)
                 assert(s1.x0 == s1.x1)
+                s1x = s1x0
                 print(f"  Comparing to segment {s1}.")
-                if s1.x0 < s0.x0:
-                    print(" Segment to the left, continuing.")
+                if s1x < s0x0:
+                    print("  Segment to the left, continuing.")
                     continue
-                elif s1.x0 >= s0.x0 and s1.x0 <= s0.x1:
+                elif s1x >= s0x0 and s1x <= s0x1:
                     print("  Possible match.")
-                    if s1.y0 <= s0.y0 and s1.y1 >= s0.y0:
-                        p = Point(s1.x0, s0.y0)
-                        d = manhattan_dist(p, Point(0, 0))
-                        print("  Intersection found at point {p}, Manhattan distance {d}.")
-                        if not min_distance or d < min_distance:
-                            best_intersection = p
-                            min_distance = d
+                    if s1y0 <= s0y and s1y1 >= s0y:
+                        handle_intersection(Point(s1x, s0y), s0, s1)
                 else:
                     print(" Segment to the right, breaking loop.")
                     break
         else:
             raise ValueError("Segment {s0} x and y both vary!")
+
+def solve_part1(wires):
+    min_distance = None
+    best_intersection = Point(0, 0)
+
+    def handle_intersection(p: Point, s0: Segment, s1: Segment):
+        nonlocal min_distance
+        nonlocal best_intersection
+        d = manhattan_dist(p, Point(0, 0))
+        print(f"  Intersection found at point {p}, Manhattan distance {d}.")
+        if p == Point(0, 0):
+            print("  Ignored intersection at origin!")
+        else:
+            if not min_distance or d < min_distance:
+                best_intersection = p
+                min_distance = d
+
+    solve(wires, handle_intersection)
+
     print(f"Closest intersection point to origin is {best_intersection} (distance {min_distance}).")
+
+    return min_distance
+
+def solve_part2(wires):
+    min_distance = None
+    best_intersection = Point(0, 0)
+
+    def handle_intersection(p: Point, s0: Segment, s1: Segment):
+        nonlocal min_distance
+        nonlocal best_intersection
+        print(f"  Delay distance to point {p} is abs(p.x - s0.x0) + abs(p.y - s0.y0) + abs(p.x - s1.x0) + abs(p.y - s1.y0) + s0.start_length + s1.start_length ({abs(p.x - s0.x0)} + {abs(p.y - s0.y0)} + {abs(p.x - s1.x0)} + {abs(p.y - s1.y0)} + {s0.start_length} + {s1.start_length}).")
+        d = abs(p.x - s0.x0) + abs(p.y - s0.y0) + abs(p.x - s1.x0) + abs(p.y - s1.y0) + s0.start_length + s1.start_length
+        print(f"  Intersection found at point {p}, delay distance {d}.")
+        if p == Point(0, 0):
+            print("  Ignored intersection at origin!")
+        else:
+            if not min_distance or d < min_distance:
+                best_intersection = p
+                min_distance = d
+
+    solve(wires, handle_intersection)
+
+    print(f"Closest intersection point to origin is {best_intersection} (distance {min_distance}).")
+
+    return min_distance
 
 # Test cases from the problem.
 test_cases = [
     {
         "wires": [["R8","U5","L5","D3"], ["U7","R6","D4","L4"]],
-        "solution": 6,
+        "solution_part1": 6,
+        "solution_part2": 30,
     },
     {
         "wires": [
             ["R75","D30","R83","U83","L12","D49","R71","U7","L72"],
             ["U62","R66","U55","R34","D71","R55","D58","R83"],
         ],
-        "solution": 159,
+        "solution_part1": 159,
+        "solution_part2": 610,
     },
     {
         "wires": [
             ["R98","U47","R26","D63","R33","U87","L62","D20","R33","U53","R51"],
             ["U98","R91","D20","R16","D67","R40","U7","R15","U6","R7"],
         ],
-        "solution": 135,
+        "solution_part1": 135,
+        "solution_part2": 410,
     },
 ]
 
 if __name__ == "__main__":
+    # for tc in test_cases:
+    #     print(tc["wires"])
+    #     assert(solve_part1(tc["wires"]) == tc["solution_part1"])
+    #     assert(solve_part2(tc["wires"]) == tc["solution_part2"])
+
     with open("input", "r") as f:
         wires = [l.rstrip().split(",") for l in f]
     print(wires)
 
-    # wires = test_cases[0]["wires"]
-    # print(wires)
-
-    draw_wires(wires, "wires.png")
-    solve_part1(wires)
+    # The answer to part 1 should be 557 (we already submitted it) so check
+    # that here.
+    assert(solve_part1(wires) == 557)
+    solve_part2(wires)
