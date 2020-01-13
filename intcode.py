@@ -6,6 +6,10 @@ class Opcode(IntEnum):
     MULTIPLY = 2
     INPUT = 3
     OUTPUT = 4
+    JT = 5
+    JF = 6
+    LT = 7
+    EQ = 8
     HALT = 99
 
 class ParameterMode(IntEnum):
@@ -19,6 +23,10 @@ ops = {
     Opcode.MULTIPLY: Op(3),
     Opcode.INPUT: Op(1), # NB. parameter can never be IMMEDIATE
     Opcode.OUTPUT: Op(1),
+    Opcode.JT: Op(2),
+    Opcode.JF: Op(2),
+    Opcode.LT: Op(3),
+    Opcode.EQ: Op(3),
     Opcode.HALT: Op(0),
 }
 
@@ -93,6 +101,28 @@ def intcode_run(memory):
         elif opcode == Opcode.OUTPUT:
             s1, = inst.params
             print(f"[output] {s1.load(memory)}")
+        elif opcode == Opcode.JT:
+            s1, s2 = inst.params
+            if s1.load(memory):
+                new_pc = s2.load(memory)
+        elif opcode == Opcode.JF:
+            s1, s2 = inst.params
+            if not s1.load(memory):
+                new_pc = s2.load(memory)
+        elif opcode == Opcode.LT:
+            s1, s2, d = inst.params
+            assert(d.mode == ParameterMode.POSITION)
+            if s1.load(memory) < s2.load(memory):
+                memory[d.value] = 1
+            else:
+                memory[d.value] = 0
+        elif opcode == Opcode.EQ:
+            s1, s2, d = inst.params
+            assert(d.mode == ParameterMode.POSITION)
+            if s1.load(memory) == s2.load(memory):
+                memory[d.value] = 1
+            else:
+                memory[d.value] = 0
         elif opcode == Opcode.HALT:
             print("[debug] Program halted.")
             break
