@@ -94,10 +94,9 @@ class IntcodeMachine:
             print(f"[debug] [{channel}] {msg}")
 
     # Decode a single instruction; returns it and the new value of the pc.
-    def decode(self):
+    def decode(self, pc, memory):
         # decode opcode; opcode is always last two digits, base 10
-        pc = self.pc
-        inst = str(self.memory[pc])
+        inst = str(memory[pc])
         self.debug_log(DebugFlags.DECODE, f"[{pc}]: {inst}")
         opcode = Opcode(int(inst[-2:]))
         pc += 1
@@ -105,24 +104,22 @@ class IntcodeMachine:
         # Pad with 0s for missing parameter modes (leading 0s)
         param_count = ops[opcode].param_count
         inst = '0' * (2 + param_count - len(inst)) + inst
-        self.debug_log(DebugFlags.DECODE, f"(Padded to {inst})")
 
         # decode params
         params = []
         for i in range(param_count):
-            params.append(Parameter(int(inst[-i - 3]), self.memory[pc]))
-            self.debug_log(DebugFlags.DECODE, f"[{pc}]: {self.memory[pc]}")
+            params.append(Parameter(int(inst[-i - 3]), memory[pc]))
+            self.debug_log(DebugFlags.DECODE, f"[{pc}]: {memory[pc]}")
             pc += 1
 
         return (pc, Instruction(opcode, params))
 
     def run(self):
-        pc = 0
         while True:
             # Decode the next instruction.
-            new_pc, inst = self.decode()
+            new_pc, inst = self.decode(self.pc, self.memory)
 
-            self.debug_log(DebugFlags.DECODE, f"[{pc:04x}] {inst}")
+            self.debug_log(DebugFlags.DECODE, f"[{self.pc:04x}] {inst}")
 
             opcode = inst.opcode
             if opcode == Opcode.ADD:
