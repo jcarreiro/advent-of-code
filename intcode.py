@@ -1,6 +1,9 @@
 from collections import namedtuple
 from enum import auto, IntEnum, Flag
 
+# Size of Intcode machine "RAM". Chosen to be much larger than most programs.
+MEMORY_SIZE = 4096
+
 class Opcode(IntEnum):
     ADD = 1
     MULTIPLY = 2
@@ -10,11 +13,13 @@ class Opcode(IntEnum):
     JF = 6
     LT = 7
     EQ = 8
+    INC_RB = 9
     HALT = 99
 
 class ParameterMode(IntEnum):
-    POSITION = 0
-    IMMEDIATE = 1
+    POSITION = 0   # Param is address
+    IMMEDIATE = 1  # Param is immediate
+    RELATIVE = 2   # Param is address relative to %rb.
 
 class DebugFlags(Flag):
     DECODE = auto() # instruction decode
@@ -33,6 +38,7 @@ ops = {
     Opcode.JF: Op(2),
     Opcode.LT: Op(3),
     Opcode.EQ: Op(3),
+    Opcode.INC_RB: Op(1),
     Opcode.HALT: Op(0),
 }
 
@@ -42,15 +48,13 @@ class Parameter:
         self.value = value
 
     def __str__(self):
-        prefix = ""
         if self.mode == ParameterMode.IMMEDIATE:
-            prefix += "$"
-        return prefix + str(self.value)
-
-    def load(self, memory):
-        if self.mode == ParameterMode.IMMEDIATE:
-            return self.value
-        return memory[self.value]
+            return f"${self.value}"
+        elif self.mode == ParameterMode.RELATIVE:
+            op = "+" if self.value > 0 else "-"
+            return f"%rb {op} {abs(self.value)}"
+        else:
+            return str(self.value)
 
 class Instruction:
     def __init__(self, opcode, params):
@@ -78,10 +82,12 @@ class IntcodeMachine:
             input_fn=input,
             output_fn=lambda v: print(f"[output] {v}"),
             debug_flags=DebugFlags(0)):
+        self.pc = 0 # program counter
+        self.rb = 0 # relative address base
         # Take a deep copy of memory so that changes in this machine can't
         # affect others which started from the same state.
-        self.pc = 0
-        self.memory = memory[:]
+        self.memory = memory[:] + [0] * (MEMORY_SIZE - len(memory))
+        assert(len(self.memory) == MEMORY_SIZE)
         self.input_fn = input_fn
         self.output_fn = output_fn
         self.debug_flags = debug_flags
@@ -114,6 +120,41 @@ class IntcodeMachine:
 
         return (pc, Instruction(opcode, params))
 
+    # Compute an address. Not the same as loading a value!
+    def effective_address(self, param):
+        if param.mode == ParameterMode.POSITION:
+            return param.value # address is absolute
+        elif param.mode == ParameterMode.RELATIVE:
+            return self.rb + param.value # address is relative to %rb
+        else:
+            raise ValueError(f"Invalid parameter mode for address: {param.mode}!")
+
+    # Load a value from memory. For convenience, param may be IMMEDIATE, in
+    # which case the immediate value is returned and no load is performed.
+    def load(self, param):
+        # Handle immediates for convenience.
+        if param.mode == ParameterMode.IMMEDIATE:
+            return param.value
+
+        # This is a load from an address, compute the address.
+        addr = None
+        if param.mode == ParameterMode.RELATIVE:
+            addr = self.rb + param.value
+        elif param.mode == ParameterMode.POSITION:
+            addr = param.value
+        else:
+            raise ValueError(f"Invalid address mode: {param.mode}!")
+
+        value = self.memory[addr]
+        self.debug_log(DebugFlags.MEMORY, f"Load from addr {addr}, value {value}.")
+        return value
+
+    # Stores value at the effective address of the given parameter.
+    def store(self, param, value):
+        addr = self.effective_address(param)
+        self.memory[addr] = value
+        self.debug_log(DebugFlags.MEMORY, f"Store to addr {addr}, value {value}.")
+
     def run(self):
         while True:
             # Decode the next instruction.
@@ -124,44 +165,43 @@ class IntcodeMachine:
             opcode = inst.opcode
             if opcode == Opcode.ADD:
                 s1, s2, d = inst.params
-                assert(d.mode == ParameterMode.POSITION)
-                self.memory[d.value] = s1.load(self.memory) + s2.load(self.memory)
+                self.store(d, self.load(s1) + self.load(s2))
             elif opcode == Opcode.MULTIPLY:
                 s1, s2, d = inst.params
-                assert(d.mode == ParameterMode.POSITION)
-                self.memory[d.value] = s1.load(self.memory) * s2.load(self.memory)
+                self.store(d, self.load(s1) * self.load(s2))
             elif opcode == Opcode.INPUT:
                 d, = inst.params
-                assert(d.mode == ParameterMode.POSITION)
                 # For now assume input must be integers
                 v = int(self.input_fn("> "))
                 self.debug_log(DebugFlags.INPUT, f"Got input {v}")
-                self.memory[d.value] = v
+                self.store(d, v)
             elif opcode == Opcode.OUTPUT:
                 s1, = inst.params
-                self.output_fn(s1.load(self.memory))
+                self.output_fn(self.load(s1))
             elif opcode == Opcode.JT:
                 s1, s2 = inst.params
-                if s1.load(self.memory):
-                    new_pc = s2.load(self.memory)
+                if self.load(s1):
+                    new_pc = self.load(s2)
             elif opcode == Opcode.JF:
                 s1, s2 = inst.params
-                if not s1.load(self.memory):
-                    new_pc = s2.load(self.memory)
+                if not self.load(s1):
+                    new_pc = self.load(s2)
             elif opcode == Opcode.LT:
                 s1, s2, d = inst.params
-                assert(d.mode == ParameterMode.POSITION)
-                if s1.load(self.memory) < s2.load(self.memory):
-                    self.memory[d.value] = 1
+                if self.load(s1) < self.load(s2):
+                    self.store(d, 1)
                 else:
-                    self.memory[d.value] = 0
+                    self.store(d, 0)
             elif opcode == Opcode.EQ:
                 s1, s2, d = inst.params
-                assert(d.mode == ParameterMode.POSITION)
-                if s1.load(self.memory) == s2.load(self.memory):
-                    self.memory[d.value] = 1
+                if self.load(s1) == self.load(s2):
+                    self.store(d, 1)
                 else:
-                    self.memory[d.value] = 0
+                    self.store(d, 0)
+            elif opcode == Opcode.INC_RB:
+                s1, = inst.params
+                self.rb += self.load(s1)
+                self.debug_log(DebugFlags.MEMORY, f"%rb = {self.rb}")
             elif opcode == Opcode.HALT:
                 self.debug_log(DebugFlags.DECODE, "Program halted.")
                 break
