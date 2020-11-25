@@ -15,6 +15,20 @@ class Bounds:
         self.bottom = min(self.bottom, p.y)
         self.left = min(self.left, p.x)
 
+    def save_state(self):
+        return {
+            "top": self.top,
+            "right": self.right,
+            "bottom": self.bottom,
+            "left": self.left,
+        }
+    
+    def restore_state(self, state):
+        self.top = state["top"]
+        self.right = state["right"]
+        self.bottom = state["bottom"]
+        self.left = state["left"]
+
 # Simple grid of cells, can be used as a "hull", "screen", etc.
 class Grid:
     def __init__(self, defaultColor):

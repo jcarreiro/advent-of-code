@@ -86,7 +86,7 @@ class IntcodeMachine:
         self.rb = 0 # relative address base
         # Take a deep copy of memory so that changes in this machine can't
         # affect others which started from the same state.
-        self.memory = memory[:] + [0] * (MEMORY_SIZE - len(memory))
+        self.memory = memory.copy() + [0] * (MEMORY_SIZE - len(memory))
         assert(len(self.memory) == MEMORY_SIZE)
         self.input_fn = input_fn
         self.output_fn = output_fn
@@ -212,6 +212,15 @@ class IntcodeMachine:
 
         # Result of program is in self.memory[0]
         return self.memory[0]
+
+    def save_state(self):
+        return {'pc': self.pc, 'rb': self.rb, 'memory': self.memory.copy()}
+
+    def restore_state(self, state):
+        self.pc = state['pc']
+        self.rb = state['rb']
+        self.memory = state['memory'].copy()
+
 
 # Runs an intcode program; memory is the starting memory contents. Returns the
 # value at address 0 once the program halts (this is the program's output).
