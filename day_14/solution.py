@@ -3,6 +3,7 @@
 import argparse
 import collections
 import copy
+import datetime
 import math
 import random
 import string
@@ -163,7 +164,6 @@ def parse_rules(s):
 
     rules = []
     for line in s:
-        print(line)
         # Ignore lines starting with '#'.
         line = line.strip()
         if line[0] == "#":
@@ -254,6 +254,74 @@ def build_product_index(rules):
             index[product.name].append(rule)
     return index
 
+def solve_part1():
+    # To apply the constraints, we need to index the rules by product so that
+    # we can quickly find the next set of constraints each time through the
+    # loop below.
+    product_index = build_product_index(rules)
+    print(product_index)
+
+    # The starting constraint is that we need 1 FUEL.
+    constraints = {'FUEL': 1}
+
+    # Sometimes when applying a rule we get "too much" of a reactant (ie. we
+    # need to apply a rule k times to get enough, and it produces m each time,
+    # but k * m > n). This tracks the "surplus" we've produced.
+    surplus = {}
+
+    # The total amount of ORE we've spent.
+    ore_needed = 0
+
+    while constraints:
+        # We're going to assume that each rule only has a single product, and
+        # that each product is only produced by one rule, for now. To update
+        # our state, we'll pop the "first" item from the constraints, find
+        # the rule that produces it, and apply it.
+        product_name, product_quantity = constraints.popitem()
+
+        # Apply any surplus units we already have (possibly from expanding
+        # a different rule) to the constraint.
+        if surplus.get(product_name, 0) > 0:
+            c = min(product_quantity, surplus[product_name])
+            product_quantity -= c
+            surplus[product_name] -= c
+            print(f"Applied {c} units of {product_name} from surplus, still need {product_quantity} units.")
+
+        # Did we have enough units already? If not expand a rule to update
+        # our constraints.
+        if product_quantity > 0:
+            # Get the rule that produces this chemical.
+            print(f"Expanding product {product_name}.")
+            product_rules = product_index[product_name]
+            assert(len(product_rules) == 1)
+            rule = product_rules[0]
+            assert(len(rule.products) == 1)
+
+            # Apply the rule to our state. We need to apply the rule k times to
+            # get enough of the inputs, but this may produce more than we
+            # actually need (see note about surplus above).
+            q = rule.products[0].quantity
+            k = math.ceil(float(product_quantity) / float(q))
+            print(f"Applying rule {rule} to constraints {k} times.")
+
+            # "Store" any extra units.
+            extra_units = q * k - product_quantity
+            if extra_units > 0:
+                # "Store" the surplus
+                surplus[product_name] = extra_units
+
+            # We need enough of the reactants to run this rule k times, so add
+            # those to our constraints.
+            for reactant in rule.reactants:
+                if reactant.name != 'ORE':
+                    constraints[reactant.name] = constraints.get(reactant.name, 0) + reactant.quantity * k
+                else:
+                    # ORE is special; it's not a constraint, we just track how
+                    # much we used.
+                    ore_needed += reactant.quantity * k
+        print(f"New constraints are {constraints}, surplus is {surplus}, ORE needed is {ore_needed}.")
+    print(f"{ore_needed} ORE needed to produce 1 FUEL.")
+
 if __name__ == '__main__':
     # In this problem we're given a set of equations showing how we can combine
     # various chemical feedstocks to get fuel for our ship. We need to figure
@@ -309,61 +377,76 @@ if __name__ == '__main__':
     product_index = build_product_index(rules)
     print(product_index)
 
-    # The starting constraint is that we need 1 FUEL.
-    constraints = {'FUEL': 1}
     # Sometimes when applying a rule we get "too much" of a reactant (ie. we
     # need to apply a rule k times to get enough, and it produces m each time,
     # but k * m > n). This tracks the "surplus" we've produced.
     surplus = {}
+
     # The total amount of ORE we've spent.
     ore_needed = 0
-    while constraints:
-        # We're going to assume that each rule only has a single product, and
-        # that each product is only produced by one rule, for now. To update
-        # our state, we'll pop the "first" item from the constraints, find
-        # the rule that produces it, and apply it.
-        product_name, product_quantity = constraints.popitem()
 
-        # Apply any surplus units we already have (possibly from expanding
-        # a different rule) to the constraint.
-        if surplus.get(product_name, 0) > 0:
-            c = min(product_quantity, surplus[product_name])
-            product_quantity -= c
-            surplus[product_name] -= c
-            print(f"Applied {c} units of {product_name} from surplus, still need {product_quantity} units.")
+    # The total amount of FUEL produced.
+    fuel_produced = 0
 
-        # Did we have enough units already? If not expand a rule to update
-        # our constraints.
-        if product_quantity > 0:
-            # Get the rule that produces this chemical.
-            print(f"Expanding product {product_name}.")
-            product_rules = product_index[product_name]
-            assert(len(product_rules) == 1)
-            rule = product_rules[0]
-            assert(len(rule.products) == 1)
+    # In part 2 we have 1e12 ORE to spend, and we need to produce as much FUEL
+    # as possible. So we loop until we hit 1e12 ORE spent.
+    start = time.monotonic()
+    while ore_needed < 1e12:
+        # The starting constraint is that we need 1 FUEL.
+        constraints = {'FUEL': 1}
+        while constraints:
+            # We're going to assume that each rule only has a single product, and
+            # that each product is only produced by one rule, for now. To update
+            # our state, we'll pop the "first" item from the constraints, find
+            # the rule that produces it, and apply it.
+            product_name, product_quantity = constraints.popitem()
 
-            # Apply the rule to our state. We need to apply the rule k times to
-            # get enough of the inputs, but this may produce more than we
-            # actually need (see note about surplus above).
-            q = rule.products[0].quantity
-            k = math.ceil(float(product_quantity) / float(q))
-            print(f"Applying rule {rule} to constraints {k} times.")
+            # Apply any surplus units we already have (possibly from expanding
+            # a different rule) to the constraint.
+            if surplus.get(product_name, 0) > 0:
+                c = min(product_quantity, surplus[product_name])
+                product_quantity -= c
+                surplus[product_name] -= c
+                # print(f"Applied {c} units of {product_name} from surplus, still need {product_quantity} units.")
 
-            # "Store" any extra units.
-            extra_units = q * k - product_quantity
-            if extra_units > 0:
-                # "Store" the surplus
-                surplus[product_name] = extra_units
+            # Did we have enough units already? If not expand a rule to update
+            # our constraints.
+            if product_quantity > 0:
+                # Get the rule that produces this chemical.
+                # print(f"Expanding product {product_name}.")
+                product_rules = product_index[product_name]
+                assert(len(product_rules) == 1)
+                rule = product_rules[0]
+                assert(len(rule.products) == 1)
 
-            # We need enough of the reactants to run this rule k times, so add
-            # those to our constraints.
-            for reactant in rule.reactants:
-                if reactant.name != 'ORE':
-                    constraints[reactant.name] = constraints.get(reactant.name, 0) + reactant.quantity * k
-                else:
-                    # ORE is special; it's not a constraint, we just track how
-                    # much we used.
-                    ore_needed += reactant.quantity * k
-        print(f"New constraints are {constraints}, surplus is {surplus}, ORE needed is {ore_needed}.")
+                # Apply the rule to our state. We need to apply the rule k times to
+                # get enough of the inputs, but this may produce more than we
+                # actually need (see note about surplus above).
+                q = rule.products[0].quantity
+                k = math.ceil(float(product_quantity) / float(q))
+                # print(f"Applying rule {rule} to constraints {k} times.")
 
-    print(f"{ore_needed} ORE needed to produce 1 FUEL.")
+                # "Store" any extra units.
+                extra_units = q * k - product_quantity
+                if extra_units > 0:
+                    # "Store" the surplus
+                    surplus[product_name] = extra_units
+
+                # We need enough of the reactants to run this rule k times, so add
+                # those to our constraints.
+                for reactant in rule.reactants:
+                    if reactant.name != 'ORE':
+                        constraints[reactant.name] = constraints.get(reactant.name, 0) + reactant.quantity * k
+                    else:
+                        # ORE is special; it's not a constraint, we just track how
+                        # much we used.
+                        ore_needed += reactant.quantity * k
+            # print(f"New constraints are {constraints}, surplus is {surplus}, ORE needed is {ore_needed}.")
+        fuel_produced += 1
+        if fuel_produced % 10000 == 0:
+            delta = time.monotonic() - start
+            ops = float(ore_needed) / float(delta)
+            ore_left = 1e12 - ore_needed
+            eta = datetime.timedelta(seconds=float(ore_left) / float(ops))
+            print(f"Produced {fuel_produced} FUEL with {ore_needed} ORE ({ops} ops, eta {eta}).")
+    print(f"Produced {fuel_produced} FUEL with {ore_needed} ORE.")
