@@ -24,9 +24,11 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
+import curses
 import intcode
 import random
 
+from common import Point
 from collections import defaultdict
 from enum import IntEnum
 
@@ -52,63 +54,83 @@ class HaltError(Exception):
     pass
 
 class Robot(object):
-    def __init__(self, program):
-        self.x = 0
-        self.y = 0
+    def __init__(self, program, on_move=None):
+        self.position = Point(0, 0)
         self.last_move = None
         self.im = intcode.IntcodeMachine(program, input_fn=self._input, output_fn=self._output)
+        self.on_move = on_move
         self.map_ = defaultdict(dict)
+        # The spaces we know exist (ie. are valid) but which are UNKNOWN.
+        # To start with this is all the spaces around the origin. Each
+        # time we visit a new space (a space that was UNKNOWN and which
+        # we discover is EMPTY) we add any spaces around it to this set
+        # which aren't already known.
+        self.frontier = set(self._points_around(Point(0, 0)))
         # The space we start on is EMPTY by definition.
-        self._set_tile(0, 0, Tile.EMPTY)
+        self._set_tile(Point(0, 0), Tile.EMPTY)
 
-    def _get_tile(self, x, y):
+    def _points_around(self, p):
+        return [
+            p.translate( 0,  1), # N
+            p.translate( 1,  1), # NE
+            p.translate( 1,  0), # E
+            p.translate( 1, -1), # SE
+            p.translate( 0, -1), # S
+            p.translate(-1, -1), # SW
+            p.translate(-1,  0), # W
+            p.translate(-1,  1), # NW
+        ]
+
+    def _get_tile(self, p):
         try:
-            return self.map_[y][x]
+            return self.map_[p.y][p.x]
         except KeyError:
             return Tile.UNKNOWN
 
-    def _set_tile(self, x, y, tile):
-        self.map_[y][x] = tile
+    def _set_tile(self, p, tile):
+        self.map_[p.y][p.x] = tile
 
     def _input(self, prompt):
         # Pick an unexplored direction and return it. If we've explored all the
-        # spaces around us, pick a random direction.
+        # spaces around us, move towards a space we haven't explored yet.
         #
-        # TOOD: do something smarter in the latter case, e.g. move toward the
-        # nearest UNKNOWN space.
+        # TODO: move toward the closest unexplored space instead of a random
+        # unexplored space.
         directions = {
-            Direction.NORTH: (self.x    , self.y + 1),
-            Direction.SOUTH: (self.x    , self.y - 1),
-            Direction.WEST:  (self.x - 1, self.y    ),
-            Direction.EAST:  (self.x + 1, self.y    ),
+            Direction.NORTH: self.position.translate( 0,  1),
+            Direction.SOUTH: self.position.translate( 0, -1),
+            Direction.WEST:  self.position.translate(-1,  0),
+            Direction.EAST:  self.position.translate( 1,  0),
         }
         move = random.choice(list(Direction))
         for d in Direction:
-            x, y = directions[d]
-            if self._get_tile(x, y) == Tile.UNKNOWN:
+            p = directions[d]
+            if self._get_tile(p) == Tile.UNKNOWN:
                 move = d
 
         # Save where we tried to go for use when we read robot output.
         self.last_move = directions[move]
-        print(f"Moving {str(move)}, new position would be {self.last_move}.")
+#        print(f"Moving {str(move)}, new position would be {self.last_move}.")
         return move
 
     def _output(self, v):
-        print(f"Got output: {str(Output(v))}.")
+#        print(f"Got output: {str(Output(v))}.")
         # Update map and robot position.
         if v == Output.WALL:
             # We hit a wall; our position did not change.
-            x, y = self.last_move
-            self._set_tile(x, y, Tile.WALL)
+            self._set_tile(self.last_move, Tile.WALL)
         elif v == Output.MOVED:
             # We moved to an empty space.
-            self.x, self.y = self.last_move
-            self._set_tile(self.x, self.y, Tile.EMPTY)
+            self.position = self.last_move
+            self._set_tile(self.position, Tile.EMPTY)
         elif v == Output.OXYGEN:
             # We moved and found the oxygen system.
-            self.x, self.y = self.last_move
-            self._set_tile(self.x, self.y, Tile.OXYGEN)
+            self.position = self.last_move
+            self._set_tile(self.position, Tile.OXYGEN)
             raise HaltError()
+
+        if self.on_move:
+            self.on_move(self.position, self.last_move, v)
 
     def run(self):
         # We should think about how to handle the case where we never find the
@@ -119,8 +141,59 @@ class Robot(object):
         except HaltError:
             pass
 
-if __name__ == "__main__":
+def main(stdscr):
+    stdscr.clear()
+
+    # Seed random so that we always get the same sequence of random choices
+    # for the robot.
+    random.seed(0)
+
+    # The last known position of the robot.
+    last_pos = Point(0, 0)
+
+    # This is the origin in our "screen coordinates".
+    tx = curses.COLS // 2
+    ty = curses.LINES // 2
+
+    def on_move(pos, last_move, result):
+        nonlocal last_pos
+        pos = pos.translate(tx, ty)
+        last_move = last_move.translate(tx, ty)
+        if result == Output.WALL:
+            stdscr.addch(last_move.y, last_move.x, '#')
+
+        # fix up old robot position, unless it's the origin.
+        if last_pos != Point(tx, ty):
+            stdscr.addch(last_pos.y, last_pos.x, '.')
+        else:
+            stdscr.addch(ty, tx, '<')
+
+        # draw robot in new position
+        stdscr.addch(pos.y, pos.x, '@')
+
+        last_pos = pos
+
+        stdscr.refresh()
+
     program = intcode.read_initial_memory("input")
-    r = Robot(program)
+    r = Robot(program, on_move=on_move)
     r.run()
-    print(f"Robot halted at position ({r.x, r.y}).")
+#    print(f"Robot halted at position ({r.x, r.y}).")
+
+if __name__ == "__main__":
+    try:
+        stdscr = curses.initscr()
+        curses.noecho()
+        curses.cbreak()
+        stdscr.keypad(True)
+        main(stdscr)
+    finally:
+        stdscr.addstr(curses.LINES - 1, 0, "Be seeing you...")
+        stdscr.refresh()
+        stdscr.keypad(False)
+        curses.nocbreak()
+        curses.echo()
+        curses.reset_shell_mode()
+        print()
+        # Don't call endwin since this clears the screen.
+        # curses.endwin()

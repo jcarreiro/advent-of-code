@@ -1,8 +1,20 @@
 from collections import defaultdict, namedtuple
 
-Point = namedtuple("Point", ["x", "y"])
+class Point(object):
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
 
-class Bounds:
+    def __eq__(self, other):
+        return self.x == other.x and self.y == other.y
+
+    def __hash__(self):
+        return hash((self.x, self.y))
+
+    def translate(self, tx, ty):
+        return Point(self.x + tx, self.y + ty)
+
+class Bounds(object):
     def __init__(self):
         self.top = 0
         self.right = 0
@@ -30,7 +42,7 @@ class Bounds:
         self.left = state["left"]
 
 # Simple grid of cells, can be used as a "hull", "screen", etc.
-class Grid:
+class Grid(object):
     def __init__(self, defaultColor):
         self.cells = defaultdict(dict)
         self.bounds = Bounds()
