@@ -49,6 +49,68 @@ class Output(IntEnum):
     MOVED = 1  # moved to requested space
     OXYGEN = 2  # moved and found oxygen system
 
+class Map(object):
+    def __init__(self):
+        self.map_ = defaultdict(dict)
+
+    def get_tile(self, p):
+        try:
+            return self.map_[p.y][p.x]
+        except KeyError:
+            return Tile.UNKNOWN
+
+    def set_tile(self, p, tile):
+        self.map_[p.y][p.x] = tile
+
+def bfs(start_pos, end_pos, map, log_fn=lambda _: None):
+    log_fn(f"[bfs] Finding path from {start_pos} to {end_pos}.")
+    q = deque([deque([start_pos])])
+    while q:
+        # Get next path from queue.
+        path = q.popleft()
+
+        log_fn(f"[bfs] Checking path: {path}")
+
+        # Try to extend path in all cardinal directions.
+        n = path[-1]
+        moves = [
+            n.translate( 0,  1), # north
+            n.translate( 0, -1), # south
+            n.translate(-1,  0), # west
+            n.translate( 1,  0), # east
+        ]
+        for move in moves:
+            log_fn(f"[bfs] Considering move: {move}")
+
+            if move == end_pos:
+                # reached target
+                new_path = path.copy()
+                new_path.append(move)
+                log_fn(f"[bfs] Done! Returning path {new_path}.")
+                return new_path
+
+            if move in path:
+                # Skip spaces we've already visited.
+                log_fn(f"[bfs] Space {move} already in path")
+                continue
+
+            
+            tile = map.get_tile(move)
+            if tile == Tile.WALL or tile == Tile.UNKNOWN:
+                # Don't path through WALLs or UNKNOWN spaces.
+                log_fn(f"[bfs] Space {move} is {str(tile)}, skipped.")
+                continue
+
+            # this is a valid next move
+            new_path = path.copy()
+            new_path.append(move)
+            log_fn(f"[bfs] Appending path {new_path} to queue.")
+            q.append(new_path)
+
+    # no path to target!
+    log_fn(f"[bfs] No path from {start_pos} to {end_pos}!")
+    return None
+
 # Used to HALT to robot when we reach the goal space.
 class HaltError(Exception):
     pass
@@ -60,7 +122,7 @@ class Robot(object):
         self.im = intcode.IntcodeMachine(program, input_fn=self._input, output_fn=self._output)
         self.on_move = on_move
         self.log_fn = log_fn
-        self.map_ = defaultdict(dict)
+        self.map_ = Map()
         # The spaces we know exist (ie. are valid) but whose contents are 
         # UNKNOWN.
         self.frontier = set(self._points_around(Point(0, 0)))
@@ -68,7 +130,7 @@ class Robot(object):
         # we're following.
         self.current_path = None
         # The space we start on is EMPTY by definition.
-        self._set_tile(Point(0, 0), Tile.EMPTY)        
+        self.map_.set_tile(Point(0, 0), Tile.EMPTY)        
 
     def _log(self, msg):
         if self.log_fn:
@@ -86,7 +148,7 @@ class Robot(object):
 
     def _add_to_frontier(self, pos):
         # Only add if space is UNKNOWN.
-        if self._get_tile(pos) == Tile.UNKNOWN:
+        if self.map_.get_tile(pos) == Tile.UNKNOWN:
             self.frontier.add(pos)
 
     def _remove_from_frontier(self, pos):
@@ -110,15 +172,6 @@ class Robot(object):
             # pos.x > next_pos.x
             return Direction.WEST
 
-    def _get_tile(self, p):
-        try:
-            return self.map_[p.y][p.x]
-        except KeyError:
-            return Tile.UNKNOWN
-
-    def _set_tile(self, p, tile):
-        self.map_[p.y][p.x] = tile
-
     def _get_path_to_closest_unknown_space(self):
         if not self.frontier:
             # No more unexplored spaces.
@@ -130,57 +183,7 @@ class Robot(object):
         frontier = sorted(self.frontier, key=lambda p: manhattan_distance(p, self.position))
         target = frontier[0]
         self._log(f"[input] Finding path to target: {target}.")
-
-        def bfs(start_pos, end_pos, grid):
-            self._log(f"[bfs] Finding path from {start_pos} to {end_pos}.")
-            q = deque([deque([start_pos])])
-            while q:
-                # Get next path from queue.
-                path = q.popleft()
-
-                self._log(f"[bfs] Checking path: {path}")
-
-                # Try to extend path in all cardinal directions.
-                n = path[-1]
-                moves = [
-                    n.translate( 0,  1), # north
-                    n.translate( 0, -1), # south
-                    n.translate(-1,  0), # west
-                    n.translate( 1,  0), # east
-                ]
-                for move in moves:
-                    self._log(f"[bfs] Considering move: {move}")
-
-                    if move == end_pos:
-                        # reached target
-                        new_path = path.copy()
-                        new_path.append(move)
-                        self._log(f"[bfs] Done! Returning path {new_path}.")
-                        return new_path
-
-                    if move in path:
-                        # Skip spaces we've already visited.
-                        self._log(f"[bfs] Space {move} already in path")
-                        continue
-
-                    
-                    tile = self._get_tile(move)
-                    if tile == Tile.WALL or tile == Tile.UNKNOWN:
-                        # Don't path through WALLs or UNKNOWN spaces.
-                        self._log(f"[bfs] Space {move} is {str(tile)}, skipped.")
-                        continue
-
-                    # this is a valid next move
-                    new_path = path.copy()
-                    new_path.append(move)
-                    self._log(f"[bfs] Appending path {new_path} to queue.")
-                    q.append(new_path)
-
-            # no path to target!
-            self._log(f"[bfs] No path from {start_pos} to {end_pos}!")
-            return None
-
-        return bfs(self.position, target, self.map_)
+        return bfs(self.position, target, self.map_, self._log)
 
     def _input(self, prompt):
         if not self.current_path:
@@ -209,21 +212,21 @@ class Robot(object):
         # Update map and robot position.
         if v == Output.WALL:
             # We hit a wall; our position did not change.
-            self._set_tile(self.last_move, Tile.WALL)
+            self.map_.set_tile(self.last_move, Tile.WALL)
             # If we hit a wall, we can remove the space with the the wall from
             # the set of unexplored spaces.
             self._remove_from_frontier(self.last_move)
         elif v == Output.MOVED:
             # We moved to an empty space.
             self.position = self.last_move
-            self._set_tile(self.position, Tile.EMPTY)
+            self.map_.set_tile(self.position, Tile.EMPTY)
             self._remove_from_frontier(self.last_move)
             for p in self._points_around(self.last_move):
                 self._add_to_frontier(p)
         elif v == Output.OXYGEN:
             # We moved and found the oxygen system.
             self.position = self.last_move
-            self._set_tile(self.position, Tile.OXYGEN)
+            self.map_.set_tile(self.position, Tile.OXYGEN)
             self._remove_from_frontier(self.last_move)
             for p in self._points_around(self.last_move):
                 self._add_to_frontier(p)
@@ -244,42 +247,60 @@ class Robot(object):
         except HaltError:
             pass
 
-def curses_main(stdscr):
-    stdscr.clear()
+def curses_main(stdscr): 
+    pad_width = 50
+    pad_height = 50
+    pad = curses.newpad(pad_height, pad_width)
+
+    # Put a box around the pad border so we can see where it is in our
+    # "window".
+    pad.box()
 
     # Seed random so that we always get the same sequence of random choices
     # for the robot.
     random.seed(0)
 
-    # The last known position of the robot.
-    last_pos = Point(0, 0)
+    tx = pad_width // 2
+    ty = pad_height // 2
 
-    # This is the origin in our "screen coordinates".
-    tx = curses.COLS // 2
-    ty = curses.LINES // 2
+    # The last known position of the robot, in "screen coordinates".
+    last_pos = Point(tx, ty)
+
+    # The position of the oxygen system, in "screen coordinates".
+    oxygen_pos = None
 
     def on_move(pos, last_move, result):
-        nonlocal last_pos
+        nonlocal last_pos, oxygen_pos
+
+        # Translate from map to screen coordinates.
         pos = pos.translate(tx, ty)
         last_move = last_move.translate(tx, ty)
-        if result == Output.WALL:
-            stdscr.addch(last_move.y, last_move.x, '#')
 
-        # fix up old robot position, unless it's the origin.
+        if result == Output.WALL:
+            pad.addch(last_move.y, last_move.x, '#')
+        elif result == Output.OXYGEN:
+            # Save position of oxygen system for later use (we'll draw it on
+            # the map when the robot moves off of this space).
+            oxygen_pos = pos
+
+        # Fix up old robot position.
         if last_pos != Point(tx, ty):
             c = '.'
-            if r._get_tile(last_pos.translate(-tx, -ty)) == Tile.OXYGEN:
+            if oxygen_pos and last_pos == oxygen_pos:
                 c = 'O'
-            stdscr.addch(last_pos.y, last_pos.x, c)
+            pad.addch(last_pos.y, last_pos.x, c)
         else:
-            stdscr.addch(ty, tx, '<')
+            pad.addch(ty, tx, '<')
 
         # draw robot in new position
-        stdscr.addch(pos.y, pos.x, '@')
+        pad.addch(pos.y, pos.x, '@')
 
         last_pos = pos
 
-        stdscr.refresh()
+        # Draw pad in our "window", centered.
+        width = min(pad_width, curses.COLS - 1)
+        height = min(pad_height, curses.LINES - 1)
+        pad.refresh(0, 0, 0, 0, height, width)
 
     # TODO: show log messages in curses interface
     log_file = open("run.log", "w")
@@ -289,25 +310,12 @@ def curses_main(stdscr):
     program = intcode.read_initial_memory("input")
     r = Robot(program, on_move=on_move, log_fn=log)
     r.run()
-#    print(f"Robot halted at position ({r.x, r.y}).")
-
-def curses_wrapper():
-    try:
-        stdscr = curses.initscr()
-        curses.noecho()
-        curses.cbreak()
-        stdscr.keypad(True)
-        curses_main(stdscr)
-    finally:
-        stdscr.addstr(curses.LINES - 1, 0, "Be seeing you...")
-        stdscr.refresh()
-        stdscr.keypad(False)
-        curses.nocbreak()
-        curses.echo()
-        curses.reset_shell_mode()
-        print()
-        # Don't call endwin since this clears the screen.
-        # curses.endwin()
+    
+    # After the robot halts, we should have the whole map in its "memory".
+    # Use it to get the shortest path from the start position to the oxygen
+    # system.
+    best_path = bfs(Point(0, 0), oxygen_pos.translate(-tx, -ty), r.map_)
+    return best_path
 
 def main():
     # none curses version, easier to debug
@@ -317,4 +325,4 @@ def main():
     print(f"Robot halted at position ({r.position.x, r.position.y}).")
 
 if __name__ == "__main__":
-    curses_wrapper()
+    curses.wrapper(curses_main)
