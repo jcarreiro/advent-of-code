@@ -27,6 +27,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 import curses
 import intcode
 import random
+import time
 
 from common import Point
 from collections import defaultdict, deque
@@ -269,6 +270,11 @@ def curses_main(stdscr):
     # The position of the oxygen system, in "screen coordinates".
     oxygen_pos = None
 
+    def refresh_pad(pad):
+        width = min(pad_width, curses.COLS - 1)
+        height = min(pad_height, curses.LINES - 1)
+        pad.refresh(0, 0, 0, 0, height, width)
+
     def on_move(pos, last_move, result):
         nonlocal last_pos, oxygen_pos
 
@@ -297,10 +303,10 @@ def curses_main(stdscr):
 
         last_pos = pos
 
-        # Draw pad in our "window", centered.
-        width = min(pad_width, curses.COLS - 1)
-        height = min(pad_height, curses.LINES - 1)
-        pad.refresh(0, 0, 0, 0, height, width)
+        # Draw pad in our "window".
+        #
+        # TODO: center pad in window if it's smaller
+        refresh_pad(pad)
 
     # TODO: show log messages in curses interface
     log_file = open("run.log", "w")
@@ -315,7 +321,27 @@ def curses_main(stdscr):
     # Use it to get the shortest path from the start position to the oxygen
     # system.
     best_path = bfs(Point(0, 0), oxygen_pos.translate(-tx, -ty), r.map_)
-    return best_path
+
+    # Color the best path in the curses display.
+    curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+    for p in best_path:
+        p = p.translate(tx, ty)
+        c = '.'
+        if p == Point(tx, ty):
+            c = '>'
+        elif p == oxygen_pos:
+            c = 'O'
+        pad.addch(p.y, p.x, c, curses.color_pair(1))
+    refresh_pad(pad)
+
+    # Maybe stop and wait for a keypress here?
+    # time.sleep(5)
+
+    pad_contents = []
+    for row in range(0, pad_height):
+        pad_contents.append(pad.instr(row, 0))
+
+    return best_path, pad_contents
 
 def main():
     # none curses version, easier to debug
@@ -325,4 +351,5 @@ def main():
     print(f"Robot halted at position ({r.position.x, r.position.y}).")
 
 if __name__ == "__main__":
-    curses.wrapper(curses_main)
+    best_path, pad_contents = curses.wrapper(curses_main)
+    print(f"Thanks for playing! Best path to oxygen system is {len(best_path) - 1} moves long.")
