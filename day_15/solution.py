@@ -337,9 +337,32 @@ def curses_main(stdscr):
     # Maybe stop and wait for a keypress here?
     # time.sleep(5)
 
-    pad_contents = []
+    # Extra a character from the pad, handling the ALT_CHARSET crap.
+    def get_char(x, y):
+        c = pad.inch(y, x)
+        log(f"x = {x}, y = {y}, c = {hex(c)}.")
+        if c & curses.A_ALTCHARSET:
+            if c == curses.ACS_ULCORNER:
+                return u"\u250c"
+            elif c == curses.ACS_HLINE:
+                return u"\u2500"
+            elif c == curses.ACS_URCORNER:
+                return u"\u2510"
+            elif c == curses.ACS_VLINE:
+                return u"\u2502"
+            elif c == curses.ACS_LLCORNER:
+                return u"\u2514"
+            elif c == curses.ACS_LRCORNER:
+                return u"\u2518"
+            return ''
+        return chr(c & ~curses.A_ATTRIBUTES)
+
+    # Capture pad contents.
+    pad_contents = ""
     for row in range(0, pad_height):
-        pad_contents.append(pad.instr(row, 0))
+        for col in range(0, pad_width):
+            pad_contents += get_char(col, row)
+        pad_contents += "\n"
 
     return best_path, pad_contents
 
@@ -352,4 +375,7 @@ def main():
 
 if __name__ == "__main__":
     best_path, pad_contents = curses.wrapper(curses_main)
+    # sys.stdout.buffer.write(pad_contents[0].hex())
+    print(pad_contents)
     print(f"Thanks for playing! Best path to oxygen system is {len(best_path) - 1} moves long.")
+    print("Be seeing you...")
