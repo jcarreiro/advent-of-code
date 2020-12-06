@@ -63,6 +63,15 @@ class Map(object):
     def set_tile(self, p, tile):
         self.map_[p.y][p.x] = tile
 
+
+def points_around(p):
+    return [
+        p.translate( 0,  1), # N
+        p.translate( 1,  0), # E
+        p.translate( 0, -1), # S
+        p.translate(-1,  0), # W
+    ]
+    
 def bfs(start_pos, end_pos, map, log_fn=lambda _: None):
     log_fn(f"[bfs] Finding path from {start_pos} to {end_pos}.")
     q = deque([deque([start_pos])])
@@ -74,12 +83,7 @@ def bfs(start_pos, end_pos, map, log_fn=lambda _: None):
 
         # Try to extend path in all cardinal directions.
         n = path[-1]
-        moves = [
-            n.translate( 0,  1), # north
-            n.translate( 0, -1), # south
-            n.translate(-1,  0), # west
-            n.translate( 1,  0), # east
-        ]
+        moves = points_around(n)
         for move in moves:
             log_fn(f"[bfs] Considering move: {move}")
 
@@ -126,7 +130,7 @@ class Robot(object):
         self.map_ = Map()
         # The spaces we know exist (ie. are valid) but whose contents are 
         # UNKNOWN.
-        self.frontier = set(self._points_around(Point(0, 0)))
+        self.frontier = set(points_around(Point(0, 0)))
         # If we're pathing to a space, this is set to the current path
         # we're following.
         self.current_path = None
@@ -138,14 +142,6 @@ class Robot(object):
             self.log_fn(msg)
         else:
             print(msg)
-
-    def _points_around(self, p):
-        return [
-            p.translate( 0,  1), # N
-            p.translate( 1,  0), # E
-            p.translate( 0, -1), # S
-            p.translate(-1,  0), # W
-        ]
 
     def _add_to_frontier(self, pos):
         # Only add if space is UNKNOWN.
@@ -222,14 +218,14 @@ class Robot(object):
             self.position = self.last_move
             self.map_.set_tile(self.position, Tile.EMPTY)
             self._remove_from_frontier(self.last_move)
-            for p in self._points_around(self.last_move):
+            for p in points_around(self.last_move):
                 self._add_to_frontier(p)
         elif v == Output.OXYGEN:
             # We moved and found the oxygen system.
             self.position = self.last_move
             self.map_.set_tile(self.position, Tile.OXYGEN)
             self._remove_from_frontier(self.last_move)
-            for p in self._points_around(self.last_move):
+            for p in points_around(self.last_move):
                 self._add_to_frontier(p)
             # TODO: we used to stop here but now we want to explore the whole
             # map; it'd be nice if we could make the code more flexible so
@@ -247,6 +243,29 @@ class Robot(object):
             self.im.run()
         except HaltError:
             pass
+
+def flood_fill(grid, start_pos, cb=None, log=None):
+    # The -1 here seems weird, but we "fill" the start position with OXYGEN
+    # on the first pass through the loop below, which is incorrect since we
+    # assume the start position starts with OXYGEN. Hence the -1.
+    fill_time = -1
+    frontier = set([start_pos])
+    while frontier:
+        if log:
+            log(f"[flood_fill] Time step = {fill_time}, frontier = {frontier}.")
+        next_frontier = set()
+        for p in frontier:
+            grid.set_tile(p, Tile.OXYGEN)
+            for q in points_around(p):
+                tile = grid.get_tile(q)
+                # We can't fill WALLs, and we can skip any tile that already
+                # has OXYGEN.
+                if tile != Tile.WALL and tile != Tile.OXYGEN:
+                    next_frontier.add(q)
+        cb(frontier)
+        fill_time += 1
+        frontier = next_frontier
+    return fill_time
 
 def curses_main(stdscr): 
     pad_width = 50
@@ -333,6 +352,23 @@ def curses_main(stdscr):
             c = 'O'
         pad.addch(p.y, p.x, c, curses.color_pair(1))
     refresh_pad(pad)
+    pad.getch()
+
+    # In part 2, we need to figure out how long it takes for the oxgygen to
+    # fill the space after the robot repairs the oxygen system. The oxygen
+    # fills all adjacent squares at each time step, so the time taken is just
+    # the shortest path to the square farthest away from the oxygen system.
+    # For fun let's animate "filling" all the squares on the map.
+    curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+    def fill_cb(filled_spaces):
+        for p in filled_spaces:
+            # This point filled up with oxygen on this time step.
+            p = p.translate(tx, ty)
+            pad.addch(p.y, p.x, 'O', curses.color_pair(2))
+        refresh_pad(pad)
+        time.sleep(0.125)
+    fill_time = flood_fill(r.map_, oxygen_pos.translate(-tx, -ty), fill_cb, log)
+    pad.getch()
 
     # Maybe stop and wait for a keypress here?
     # time.sleep(5)
@@ -340,7 +376,7 @@ def curses_main(stdscr):
     # Extra a character from the pad, handling the ALT_CHARSET crap.
     def get_char(x, y):
         c = pad.inch(y, x)
-        log(f"x = {x}, y = {y}, c = {hex(c)}.")
+        # log(f"[get_char] x = {x}, y = {y}, c = {hex(c)}.")
         if c & curses.A_ALTCHARSET:
             if c == curses.ACS_ULCORNER:
                 return u"\u250c"
@@ -364,18 +400,49 @@ def curses_main(stdscr):
             pad_contents += get_char(col, row)
         pad_contents += "\n"
 
-    return best_path, pad_contents
+    return best_path, pad_contents, fill_time
 
-def main():
-    # none curses version, easier to debug
-    program = intcode.read_initial_memory("input")
-    r = Robot(program)
-    r.run()
-    print(f"Robot halted at position ({r.position.x, r.position.y}).")
+
+def flood_fill_test():
+    def parse_map(s):
+        map_ = Map()
+        y = 0
+        for line in s:
+            print(f"Got line: {line}")
+            x = 0
+            for c in line:
+                print(f"Got character: {c}")
+                p = Point(x, y)
+                if c == '#':
+                    print(f"Got WALL at {p}")
+                    map_.set_tile(p, Tile.WALL)
+                elif c == ".":
+                    print(f"Got EMPTY at {p}")
+                    map_.set_tile(p, Tile.EMPTY)
+                elif c == "O":
+                    print(f"Got OXYGEN at {p}")
+                    map_.set_tile(p, Tile.OXYGEN)
+                x += 1
+            y += 1
+        return map_
+
+    example_map = [
+        " ##   ",
+        "#..## ",
+        "#.#..#",
+        "#.O.# ",
+        " ###  ",
+    ]
+    map_ = parse_map(example_map)
+    print(f"Got map: {map_}")
+    fill_time = flood_fill(map_, Point(2, 3))
+    print(f"Map filled in {fill_time} time steps.")
 
 if __name__ == "__main__":
-    best_path, pad_contents = curses.wrapper(curses_main)
-    # sys.stdout.buffer.write(pad_contents[0].hex())
+    best_path, pad_contents, fill_time = curses.wrapper(curses_main)
     print(pad_contents)
-    print(f"Thanks for playing! Best path to oxygen system is {len(best_path) - 1} moves long.")
+    print(f"Thanks for playing! Best path to oxygen system is "
+          f"{len(best_path) - 1} moves long. It took {fill_time} time steps "
+          f"to fill the entire map with oxygen.")
     print("Be seeing you...")
+
