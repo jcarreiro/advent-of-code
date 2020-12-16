@@ -206,6 +206,23 @@ def solve_part2_alt2(input_list, phases, out_offset=0, out_len=8):
         input_list=list(w)
     return input_list[out_offset:out_len]
 
+def fft(input_list, phases, out_offset=0, out_len=8):
+    # The trick here is that our message is in the second half of the output
+    # list, and the transform matrix is upper triangular and all the entries
+    # that we care about (in the bottom half of the matrix) are positive.
+    #
+    # So if we work backwards, we just need to add and we don't need to worry
+    # about taking the absolute value.
+    #
+    # Truncate the input to just the range we need.
+    v = input_list[out_offset:]
+    n = len(v)
+    for phase in range(1, phases+1):
+        print(f"Processing phase {phase} of {phases}.")
+        for i in range(n-2, -1, -1):
+            v[i] = (v[i] + v[i+1]) % 10
+    return v[0:out_len]
+
 if __name__ == "__main__":
     # This is the first example in the problem. After 4 phases, the output
     # should be 0, 1, 0, 2, 9, 4, 9, 8.
@@ -242,10 +259,8 @@ if __name__ == "__main__":
     def list_to_int(l):
         return int(''.join([str(x) for x in l]))
 
-    # This was from part 1.
-    # output = solve_part2_alt2(read_number_list("input"), 100)
-    # print(''.join([str(x) for x in output]))
-
-#    output = solve_part2_alt2(example_5 * 10000, 100, 303673, 8)
-    output = solve_part2_alt2(example_1, 4)
+#    output = fft(example_1, 4, 4, 4)
+    input_list = read_number_list("input")
+    out_offset = list_to_int(input_list[0:7])
+    output = fft(input_list * 10000, 100, out_offset, 8)
     print(''.join([str(x) for x in output]))
