@@ -228,33 +228,31 @@ def parse_expr(line, pos):
         return (Expr([rhs], NotOp()), pos)
 
 class Gate:
-    def __init__(self, input_wires, op, output_wire, read_fn, write_fn):
+    def __init__(self, input_wires, op, output_wire):
         self.input_wires = input_wires
         self.op = op
         self.output_wire = output_wire
-        self.read_fn = read_fn
-        self.write_fn = write_fn
 
     def __str__(self):
         return f"Gate({self.op.to_string(self.input_wires)} -> {self.output_wire})"
 
-    def _read_inputs(self):
+    def _read_inputs(self, read_fn):
         inputs = []
         for term in self.input_wires:
             if term.type == Term.Type.NUMBER:
                 inputs.append(term.value)
             elif term.type == Term.Type.WIRE:
-                inputs.append(self.read_fn(term.value))
+                inputs.append(read_fn(term.value))
             else:
                 raise ValueError(f"Unrecognized term type: {term.type}")
         return inputs
     
-    def apply(self):
+    def apply(self, read_fn, write_fn):
         print(f"Applying {self}.")
 
         # Get input values by reading wire values; note inputs can also be
         # numbers!
-        inputs = self._read_inputs()
+        inputs = self._read_inputs(read_fn)
         print(f"Got inputs: {inputs}.")
 
         # Check if we're ready to apply this gate.
@@ -264,14 +262,14 @@ class Gate:
             # Note that wire values are always 16-bit. So truncate on each
             # write back to "memory" here.
             output = self.op.apply(inputs) & 0xffff
-            self.write_fn(self.output_wire, output)
+            write_fn(self.output_wire, output)
 
 def parse_wire(line, pos):
     token, pos = read_token(line, pos)
     expect(line, token, [Token.Type.WIRE])
     return (token.value, pos)
 
-def parse_gate(line, read_wire, write_wire):
+def parse_gate(line):
     # Read the expression for this gate.
     pos = 0
     expr, pos = parse_expr(line, pos)
@@ -284,29 +282,15 @@ def parse_gate(line, read_wire, write_wire):
     wire, pos = parse_wire(line, pos)
 
     # build and return the gate object
-    return Gate(expr.inputs, expr.op, wire, read_wire, write_wire)
+    return Gate(expr.inputs, expr.op, wire)
 
-def main():
-    wires = collections.defaultdict(lambda: None)
-    wire_value_changed = True
+class Simulation:
+    def __init__(self):
+        self.gates = []
+        self.overrides = {}
 
-    def read_wire(w):
-        return wires[w]
-
-    def write_wire(w, v):
-        nonlocal wire_value_changed
-
-        print(f"{w} <- {v}")
-
-        # did the value of this wire change?
-        if wires[w] != v:
-            wire_value_changed = True
-        wires[w] = v
-
-    gates = []
-#    for line in test_circuit.splitlines():
-    with open("input.txt") as input_file:
-        for line in input_file:
+    def load_gates(self, gate_defs):
+        for line in gate_defs:
             line = line.strip()
             print(line)
 
@@ -318,25 +302,53 @@ def main():
             #   op    => "AND" || "OR" || "LSHIFT" || "RSHIFT"
             #
             # We call everything a gate, even if it's a fixed value ("123 -> a").
-            gate = parse_gate(line, read_wire, write_wire)
+            gate = parse_gate(line)
             print(gate)
-            gates.append(gate)
+            self.gates.append(gate)
+        
+    def pin(self, wire, value):
+        """Pins a wire to a specific value."""
+        self.overrides[wire] = value
 
-    print(gates)
+    def run(self):
+        wires = collections.defaultdict(lambda: None)
+        wire_value_changed = True
+        
+        def read_wire(w):
+            if w in self.overrides:
+                return self.overrides[w]
+            return wires[w]
 
-    # "run" the circuit by applying each gate at each time step until the
-    # wire values stop changing
-    t = 1
-    while wire_value_changed:
-        wire_value_changed = False
-        print(f"Running time step: {t}")
-        for g in gates:
-            g.apply()
-        t += 1
+        def write_wire(w, v):
+            nonlocal wire_value_changed            
+            print(f"{w} <- {v}")
+            if wires[w] != v and w not in self.overrides:
+                wire_value_changed = True
+                wires[w] = v
 
-    print(f"Final wire values at time step {t}:")
-    for w in sorted(wires.keys()):
-        print(f"{w}: {wires[w]}")
+        # "Run" the circuit by applying each gate at each time step until the
+        # wire values stop changing.
+        t = 1
+        while wire_value_changed:
+            wire_value_changed = False
+            print(f"Running time step: {t}")
+            for g in self.gates:
+                g.apply(read_wire, write_wire)
+            t += 1
+
+        print(f"Final wire values at time step {t}:")
+        for w in sorted(wires.keys()):
+            print(f"{w}: {wires[w]}")
+
+def main():
+    simulation = Simulation()
+    with open("input.txt") as input_file:
+        simulation.load_gates(input_file)
+    simulation.run()
+
+    print("Re-running simulation for part 2...")
+    simulation.pin('b', 46065)
+    simulation.run()
 
 if __name__ == "__main__":
     main()
