@@ -4,12 +4,13 @@ import numpy as np
 
 # A bingo board.
 class Board:
-    def __init__(self, board):
+    def __init__(self, board_num, board):
+        self.board_num = board_num
         self.board = np.array(board)
         self.stamps = np.zeros(self.board.shape, dtype=bool)
         
     def __str__(self):
-        s = ""
+        s = f"Board {self.board_num}\n"
         rows, cols = self.board.shape
         for r in range(rows):
             for c in range(cols):
@@ -40,20 +41,22 @@ def main():
 
         boards = []
         board = None
+        board_num = 0
         for line in input_file:
             line = line.strip()
             print(line)
             if not line:
                 # blank line => new board
                 if board:
-                    boards.append(Board(board))
+                    boards.append(Board(board_num, board))
                 board = []
+                board_num += 1
             else:
                 board.append([int(x) for x in line.split()])
 
         # When we run out of lines, we should have one complete board left to
         # append to our list.
-        boards.append(Board(board)) 
+        boards.append(Board(board_num, board)) 
 
     print(f"Draws = {draws}")
     print("Boards = ")
@@ -61,29 +64,35 @@ def main():
         print(b)
 
     # Find the winning board by playing all draws.
-    last_draw = None
-    winning_board = None
-    for draw in draws:
-        if winning_board:
+    #
+    # In part 1, we need to find the first board that wins; in part 2, the last
+    # board.
+    winning_boards = []
+    for t in range(len(draws)):
+        if len(winning_boards) == len(boards):
+            print("All boards are winning now!")
             break
 
-        last_draw = draw
-        print(f"Playing draw: {draw}")
-
+        draw = draws[t]
+        print(f"Playing draw {draw} on timestep {t}.")
         for board in boards:
-            board.play(draw)
-            if board.is_winning():
-                print("Found winning board!")
-                winning_board = board
+            # Once a board is winning, don't play it anymore.
+            if not board.is_winning():
+                board.play(draw)
+                if board.is_winning():
+                    print(f"Board {board.board_num} won on timestep {t}!")
+                    winning_boards.append((board, t, draw))
 
-    # we either won or ran out of draws
-    print(f"Last draw was: {last_draw}")
-    if winning_board:
-        # print score
-        print(f"Winning board is:\n{winning_board}")
-        print(f"Winning board has score: {winning_board.score(last_draw)}")
+    # Print score for first winning board and last winning board.
+    if winning_boards:
+        def print_score(name, board, t, last_draw):
+            print(f"{name} winning board scored {board.score(draw)}! Board:\n{board}")
+
+        print_score("First", *winning_boards[0])
+        if winning_boards[0] != winning_boards[-1]:
+            print_score("Last", *winning_boards[-1])
     else:
-        print(f"No winning board!")
+        print(f"No winning boards!")
 
 if __name__ == "__main__":
     main()
