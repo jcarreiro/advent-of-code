@@ -21,14 +21,20 @@ from advent_of_code.utils import read_array_from_file
 #
 # To solve the problem, we need to simulate 100 steps of this process and count
 # the total number of flashes we see.
-def solve_part1(input_file):
+#
+# For part 2, we need to report the first timestep where all the octopus
+# synchronize (ie. they all flash).
+#
+# TODO: it'd be fun to use ncurses to show a movie of the energy levels
+# changing / octopus flashing
+def simulate(input_file, max_time_step=100):
     # Read in the array of initial energy levels.
     A = read_array_from_file(input_file)
     print(A)
 
     # Simulate 100 timesteps and count the flashes we see.
     flashes = 0
-    for t in range(1,101):
+    for t in range(1, max_time_step + 1):
         print(f"Running timestamp {t}.")
 
         # First we need to increase the energy level of all octopus by 1.
@@ -81,13 +87,24 @@ def solve_part1(input_file):
                 print(f"{BOLD}{A[i][j]}{END}", end="")
             print()
 
+        # If every octopus flashed, break the loop.
+        if np.all(flashed):
+            break
+
     print(f"Got {flashes} flashes in {t} time steps.")
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-t",
+        "--max-time-step",
+        type=int,
+        default=100,
+        help="max time step for simulation",
+    )
     parser.add_argument("input_file", type=argparse.FileType())
     args = parser.parse_args()
-    solve_part1(args.input_file)
+    simulate(args.input_file, max_time_step=args.max_time_step)
 
 if __name__ == "__main__":
     main()
