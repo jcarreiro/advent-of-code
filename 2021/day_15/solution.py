@@ -11,14 +11,35 @@ from advent_of_code.utils import read_array_from_file
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("-r", "--repeat", type=int, default=1)
     parser.add_argument("input_file", type=argparse.FileType())
     args = parser.parse_args()
+
+    if args.repeat < 1:
+        raise ValueError("Invalid repeat count: {args.repeat}!")
 
     # In this puzzle, we need to find the lowest cost path through a 2d array
     # (where the value at each index is the cost of visiting that index). This
     # is a straightforward application of Djikstra's algorithm.
     A = read_array_from_file(args.input_file)
     print(A)
+
+    # For part two of the puzzle, the input array repeats in each dimension,
+    # with the counts increasing by 1 (mod 10) for each repeat. We can do this
+    # by hstack-ing until we get a full 'row' and then vstacking the rows.
+    def offset(A, i):
+        A += i
+        A[A >= 10] -= 9 # wrap back around to 1
+        return A
+
+    if args.repeat > 0:
+        A = np.hstack(tuple(offset(A.copy(), i) for i in range(args.repeat)))
+        A = np.vstack(tuple(offset(A.copy(), i) for i in range(args.repeat)))
+
+    for r in range(A.shape[0]):
+        for c in range(A.shape[1]):
+            print(A[r][c], end="")
+        print()
 
     # This is the cost for each node, which we update as we visit the node's
     # neighbors. To start with, the cost for every node is infinity (ie. we
