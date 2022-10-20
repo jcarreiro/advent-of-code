@@ -4,6 +4,7 @@ import argparse
 import logging
 
 from enum import IntEnum
+from functools import reduce
 
 class BitStream:
     def __init__(self, hex_str):
@@ -43,7 +44,27 @@ class BitStream:
         return ret
 
 class PacketType(IntEnum):
+    SUM = 0
+    PRODUCT = 1
+    MINIMUM = 2
+    MAXIMUM = 3
     LITERAL = 4
+    # Note that these three types should always have exactly two subpackets.
+    GREATER_THAN = 5
+    LESS_THAN = 6
+    EQUAL_TO = 7
+
+# This is used to print out packets.
+OP_NAMES = {
+    PacketType.SUM: "SumPacket",
+    PacketType.PRODUCT: "ProductPacket",
+    PacketType.MINIMUM: "MinimumPacket",
+    PacketType.MAXIMUM: "MaximumPacket",
+    PacketType.LITERAL: "LiteralPacket",
+    PacketType.GREATER_THAN: "GreaterThanPacket",
+    PacketType.LESS_THAN: "LessThanPacket",
+    PacketType.EQUAL_TO: "EqualToPacket",   
+}
 
 class Packet:
     def __init__(self, version, type_id):
@@ -65,13 +86,83 @@ class LiteralPacket(Packet):
     def __repr__(self):
         return f"LiteralPacket({self.version}, {self.type_id}, {self.value})"
 
+    def eval(self):
+        return self.value
+
 class OperatorPacket(Packet):
     def __init__(self, version, type_id, subpackets):
         super().__init__(version, type_id)
         self.subpackets = subpackets
 
     def __repr__(self):
-        return f"OperatorPacket({self.version}, {self.type_id}, {self.subpackets})"
+        return f"{OP_NAMES[self.type_id]}(({self.version}, {self.type_id}, {self.subpackets})"
+
+    def eval(self):
+        raise RuntimeError("Unimplemented operator!")
+
+# TODO: factor out repeated code in operator implementations
+
+class SumPacket(OperatorPacket):
+    def __init__(self, version, type_id, subpackets):
+        super().__init__(version, type_id, subpackets)
+
+    def eval(self):
+        return sum([p.eval() for p in self.subpackets])
+
+class ProductPacket(OperatorPacket):
+    def __init__(self, version, type_id, subpackets):
+        super().__init__(version, type_id, subpackets)
+
+    def eval(self):
+        if self.subpackets:
+            return reduce(lambda x, y: x * y, [p.eval() for p in self.subpackets])
+        return 0
+
+class MinimumPacket(OperatorPacket):
+    def __init__(self, version, type_id, subpackets):
+        super().__init__(version, type_id, subpackets)
+
+    def eval(self):
+        return min([p.eval() for p in self.subpackets])
+
+class MaximumPacket(OperatorPacket):
+    def __init__(self, version, type_id, subpackets):
+        super().__init__(version, type_id, subpackets)
+
+    def eval(self):
+        return max([p.eval() for p in self.subpackets])
+
+class BinaryOperatorPacket(OperatorPacket):
+    def __init__(self, version, type_id, subpackets):
+        assert len(subpackets) == 2
+        super().__init__(version, type_id, subpackets)
+
+class GreaterThanPacket(BinaryOperatorPacket):
+    def __init__(self, version, type_id, subpackets):
+        super().__init__(version, type_id, subpackets)
+        
+    def eval(self):
+        a = self.subpackets[0].eval()
+        b = self.subpackets[1].eval()
+        return int(a > b)
+
+class LessThanPacket(BinaryOperatorPacket):
+    def __init__(self, version, type_id, subpackets):
+        super().__init__(version, type_id, subpackets)
+
+    def eval(self):
+        a = self.subpackets[0].eval()
+        b = self.subpackets[1].eval()
+        return int(a < b)
+
+class EqualToPacket(BinaryOperatorPacket):
+    def __init__(self, version, type_id, subpackets):
+        super().__init__(version, type_id, subpackets)
+        
+    def eval(self):
+        a = self.subpackets[0].eval()
+        b = self.subpackets[1].eval()
+        return int(a == b)
 
 def decode_packets_internal(bitstream):
     start_pos = bitstream.position()
@@ -145,11 +236,26 @@ def decode_packets_internal(bitstream):
             subpackets.append(p)
             read_count += 1
             read_bits += n
-            
-        return (
-            OperatorPacket(version, type_id, subpackets),
-            bitstream.position() - start_pos,
-        )
+
+        # Switch on type_id to identify the correct operator.
+        OPERATORS = {
+            PacketType.SUM: SumPacket,
+            PacketType.PRODUCT: ProductPacket,
+            PacketType.MINIMUM: MinimumPacket,
+            PacketType.MAXIMUM: MaximumPacket,
+            PacketType.GREATER_THAN: GreaterThanPacket,
+            PacketType.LESS_THAN: LessThanPacket,
+            PacketType.EQUAL_TO: EqualToPacket,
+        }
+        if type_id in OPERATORS:
+            return (
+                OPERATORS[type_id](version, type_id, subpackets),
+                bitstream.position() - start_pos,
+            )
+        else:
+            # We didn't recognize this packet type.
+            raise ValueError(f"Unrecognized packet type ID: {type_id}!")
+#        return (op, bitstream.position() - start_pos)
 
 def decode_packets(message):
     p, n = decode_packets_internal(BitStream(message))
@@ -171,7 +277,7 @@ def pretty_print(packet):
         if packet.type_id == PacketType.LITERAL:
             print_indented(packet, depth)
         else:
-            print_indented("OperatorPacket(", depth)
+            print_indented(f"{OP_NAMES[packet.type_id]}(", depth)
             print_indented(f"{packet.version},", depth + 1)
             print_indented(f"{packet.type_id},", depth + 1)
             for subpacket in packet.subpackets:
@@ -184,12 +290,21 @@ def main():
     parser.add_argument("input_file", type=argparse.FileType())
     args = parser.parse_args()
     message = args.input_file.readline().strip()
+
     print(f"Got input: {message}")
+
+    # Decode message.
     packet = decode_packets(message)
     print(f"Decoded packet:")
     pretty_print(packet)
+
+    # Sum all packet versions. This was the solution to part 1 (which functioned
+    # as a kind of checksum to test that basic decoding worked, I guess).
     version_sum = sum_packet_versions(packet)
     print(f"Sum of all packet versions is: {version_sum}")
+
+    # Interpret all the instructions and get the output for the top level packet.
+    print(f"Value of outermost packet: {packet.eval()}")
 
 if __name__ == "__main__":
     main()
