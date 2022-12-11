@@ -76,6 +76,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-timestep", type=int, default=20)
     parser.add_argument("--velocity", type=str)
+    parser.add_argument("--min-vx", type=int, default=0)
+    parser.add_argument("--max-vx", type=int, default=100)
+    parser.add_argument("--min-vy", type=int, default=0)
+    parser.add_argument("--max-vy", type=int, default=100)
     parser.add_argument("input_file", type=argparse.FileType())
     args = parser.parse_args()
 
@@ -137,7 +141,7 @@ def main():
     def hit_target(trajectory, target):
         return next(filter(target.contains, trajectory), False)
 
-    def max_y(trajectory):
+    def get_max_y(trajectory):
         return max([p.y for p in trajectory])
 
     if args.velocity:
@@ -148,32 +152,31 @@ def main():
         print_trajectory(trajectory, target)
         if hit_target(trajectory, target):
             print(f"Hit target!")
-        print(f"Max y was {max_y(trajectory)}.")
+        print(f"Max y was {get_max_y(trajectory)}.")
     else:    
-        # Compute optimal velocity on each axis.
+        # Compute optimal velocity on each axis. For now let's just do a simple
+        # grid search. We'll distribute a number of points uniformly over a
+        # range of initial velocities and report the best one we find.
         #
-        # For now let's just do a simple grid search. We'll distribute a number of
-        # points uniformly over a range of initial velocities and report the best
-        # one we find.
+        # I solved part 2 by running the script like this:
         #
-        # We can cut down on the search space a bit. For example, any vx less than
-        # 1/2 of the distance to the target will result in the probe never reaching
-        # the target.
-        vxs = np.arange(0, 10)
-        vys = np.arange(0, 10)
+        #   py3 solution.py --min-vx=0 --max-vx=262 --min-vy=-100 --max-vy=100 --max-timestep=1000 input.txt
+        #
+        # and letting it grid search the space (the answer was 940).
+        s = set()
+        vxs = np.arange(args.min_vx, args.max_vx + 1)
+        vys = np.arange(args.min_vy, args.max_vy + 1)
         max_y = -np.inf
         for (vx, vy) in itertools.product(vxs, vys):
             print(f"Checking {vx}, {vy}")
             trajectory = simulate(vx, vy, args.max_timestep, stop_if_passed_target)
-            # print_trajectory(trajectory, target)
-    
-            # Check if we hit the target.
-            if next(filter(target.contains, trajectory), False):
-                # Save the max y we hit, if we hit the target.
-                y = max([p.y for p in trajectory])
-                if y > max_y:
-                    max_y = y
+            if hit_target(trajectory, target):
+                print(f"Hit target!")
+                max_y = max(max_y, get_max_y(trajectory))
+                s.add((vx, vy))
         print(f"Max y was {max_y}.")
+        print(f"Found {len(s)} initial velocities that hit the target.")
+        print(sorted(s))
 
 if __name__ == "__main__":
     main()
