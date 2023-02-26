@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import argparse
+import json
 import math
 
 class SnailNumber:
@@ -13,17 +15,39 @@ class SnailNumber:
     def __str__(self):
         return f"[{self.left}, {self.right}]"
 
+    def __add__(self, other):
+        # To add a two SnailNumbers, we first make a new pair from the parts,
+        # then we reduce() the number.
+        #
+        # For convenience, we define SnailNumber(None, None) as the identity
+        # element, i.e. SnailNumber(a, b) + SnailNumber(None, None) =
+        # SnailNumber(a, b).
+        if self.is_identity():
+            return other
+        elif other.is_identity():
+            return self
+        else:
+            return SnailNumber(self, other).reduce()
+
     def __eq__(self, other):
         if isinstance(other, SnailNumber):
             return self.left == other.left and self.right == other.right
         else:
             return False
 
-    def add(a, b):
-        # To add a two SnailNumbers, we first make a new pair from the parts,
-        # then we reduce() the number.
-        n = SnailNumber(a, b)
-        return n.reduce()
+    def is_identity(self):
+        return self.left == None or self.right == None
+
+    def identity():
+        return SnailNumber(None, None)
+
+    def magnitude(self):
+        def visit(n):
+            if not isinstance(n, SnailNumber):
+                return n
+            else:
+                return 3 * visit(n.left) + 2 * visit(n.right)
+        return visit(self)
 
     def reduce(self):
         # Repeatedly explode or split until neither action applies.
@@ -52,7 +76,6 @@ class SnailNumber:
             break
 
         return a
-
 
     def explode(self):
         def visit(n, depth, exploded):
@@ -85,26 +108,39 @@ class SnailNumber:
                     right = n.right
                     rp = []
 
+                def add_to_predecessor(node, value):
+                    print(f"Adding {value} to {node}.")
+                    if isinstance(node.right, SnailNumber):
+                        add_to_predecessor(node.right, value)
+                    else:
+                        node.right += value
+
+                def add_to_successor(node, value):
+                    print(f"Adding {value} to {node}.")
+                    if isinstance(node.left, SnailNumber):
+                        add_to_successor(node.left, value)
+                    else:
+                        node.left += value
+
                 parts = []
                 if lp:
                     # Our left child exploded. We can add the right part
                     # of the pair to the left child of our right child,
                     # then we need to return the rest up to our parent.
-                    print(f"Adding {lp[1]} to {right}.")
-                    if lp[1] != 0:
-                        if isinstance(n.right, SnailNumber):
-                            right.left += lp[1]
-                        else:
-                            right += lp[1]
+                    print(f"Adding {lp[1]} to right child: {right}.")
+                    if isinstance(right, SnailNumber):
+                        add_to_successor(right, lp[1])
+                    else:
+                        right += lp[1]
                     parts = [lp[0], 0]
                 elif rp:
                     # Our right child exploded. We can add the left part
-                    # of the pair to the right child of our let child,
+                    # of the pair to the right child of our left child,
                     # then we need to return the rest up to our parent.
-                    print(f"Adding {rp[0]} to {left}.")
+                    print(f"Adding {rp[0]} to left child: {left}.")
                     if rp[0] != 0:
                         if isinstance(n.left, SnailNumber):
-                            left.right += rp[0]
+                            add_to_predecessor(left, rp[0])
                         else:
                             left += rp[0]
                     parts = [0, rp[1]]
@@ -161,8 +197,23 @@ class SnailNumber:
                 return e
         return visit(self)
 
+def sum_list(input_file):
+    return sum(
+        [SnailNumber.from_list(json.loads(line)) for line in input_file],
+        start=SnailNumber.identity(),
+    )
+
+def solve_part1(input_file):
+    sum_ = sum_list(input_file)
+    print(f"Got result: {sum_}")
+    print(f"Magnitude: {sum_.magnitude()}")
+
+
 def main():
-    pass
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input_file", type=argparse.FileType())
+    args = parser.parse_args()
+    solve_part1(args.input_file)
 
 if __name__ == "__main__":
     main()
