@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
 import argparse
+import itertools
 import json
+import logging
 import math
 
 class SnailNumber:
@@ -54,32 +56,32 @@ class SnailNumber:
         a = self
         b = None
         while True:
-            print(f"Reducing {a}.")
+            logging.debug(f"Reducing {a}.")
 
             # Try to explode.
             b = a.explode()
             if b != a:
-                print(f"{a} exploded!")
+                logging.debug(f"{a} exploded!")
                 a = b
                 continue
 
             # Try to split.
             b = a.split()
             if b != a:
-                print(f"{a} split!")
+                logging.debug(f"{a} split!")
                 a = b
                 continue
 
             # If we get here then neither the explode nor the split action
             # changed the number, so we're done with this reduce step.
-            print(f"{a} unchanged after explode/split, reduce finished.")
+            logging.debug(f"{a} unchanged after explode/split, reduce finished.")
             break
 
         return a
 
     def explode(self):
         def visit(n, depth, exploded):
-            print(f"Visiting: {n}, depth={depth}, exploded={exploded}.")
+            logging.debug(f"Visiting: {n}, depth={depth}, exploded={exploded}.")
             # If we reach a depth of 4, and we haven't already exploded, then
             # this pair "explodes".
             if depth == 4 and not exploded:
@@ -93,7 +95,7 @@ class SnailNumber:
                 # the parts to be added to the numbers to our left and right,
                 # respectively.
                 rv = (0, [n.left, n.right])
-                print(f"{n} exploded! Returning {rv}.")
+                logging.debug(f"{n} exploded! Returning {rv}.")
                 return rv
             else:
                 if isinstance(n.left, SnailNumber):
@@ -109,14 +111,14 @@ class SnailNumber:
                     rp = []
 
                 def add_to_predecessor(node, value):
-                    print(f"Adding {value} to {node}.")
+                    logging.debug(f"Adding {value} to {node}.")
                     if isinstance(node.right, SnailNumber):
                         add_to_predecessor(node.right, value)
                     else:
                         node.right += value
 
                 def add_to_successor(node, value):
-                    print(f"Adding {value} to {node}.")
+                    logging.debug(f"Adding {value} to {node}.")
                     if isinstance(node.left, SnailNumber):
                         add_to_successor(node.left, value)
                     else:
@@ -127,7 +129,7 @@ class SnailNumber:
                     # Our left child exploded. We can add the right part
                     # of the pair to the left child of our right child,
                     # then we need to return the rest up to our parent.
-                    print(f"Adding {lp[1]} to right child: {right}.")
+                    logging.debug(f"Adding {lp[1]} to right child: {right}.")
                     if isinstance(right, SnailNumber):
                         add_to_successor(right, lp[1])
                     else:
@@ -137,7 +139,7 @@ class SnailNumber:
                     # Our right child exploded. We can add the left part
                     # of the pair to the right child of our left child,
                     # then we need to return the rest up to our parent.
-                    print(f"Adding {rp[0]} to left child: {left}.")
+                    logging.debug(f"Adding {rp[0]} to left child: {left}.")
                     if rp[0] != 0:
                         if isinstance(n.left, SnailNumber):
                             add_to_predecessor(left, rp[0])
@@ -146,7 +148,7 @@ class SnailNumber:
                     parts = [0, rp[1]]
 
             rv = (SnailNumber(left, right), parts)
-            print(f"Returning {rv}")
+            logging.debug(f"Returning {rv}")
             return rv
 
         return visit(self, 0, False)[0]
@@ -197,23 +199,56 @@ class SnailNumber:
                 return e
         return visit(self)
 
+def read_list(input_file):
+    return [SnailNumber.from_list(json.loads(line)) for line in input_file]
+
 def sum_list(input_file):
-    return sum(
-        [SnailNumber.from_list(json.loads(line)) for line in input_file],
-        start=SnailNumber.identity(),
-    )
+    return sum(read_list(input_file), start=SnailNumber.identity())
 
 def solve_part1(input_file):
+    # In part 1, we're given a list of SnailNumbers. We need to add up all the
+    # numbers, then get the magnitude of the result; that's our answer.
     sum_ = sum_list(input_file)
     print(f"Got result: {sum_}")
     print(f"Magnitude: {sum_.magnitude()}")
 
+def solve_part2(input_file):
+    # In part 2, we have to find the largest magnitude of any two of the numbers
+    # from the homework assignment. We're just going to check all the pairs; if
+    # this is too slow, we can try to guide the search somehow.
+    numbers = read_list(input_file)
+    best_pair = None
+    best_magnitude = None
+    for i, j in itertools.permutations(range(len(numbers)), 2):
+        print(f"Checking indices {i}, {j}.")
+        n = numbers[i] + numbers[j]
+        mag = n.magnitude()
+        if not best_magnitude or mag > best_magnitude:
+            print(f"Found new best magnitude: {mag}.")
+            best_pair = (i, j)
+            best_magnitude = mag
+
+    print(f"Best magnitude was {best_magnitude}.")
+    a = numbers[best_pair[0]]
+    b = numbers[best_pair[1]]
+    best_sum = a + b
+    print(f"This was the magnitude of {a} + {b}, which reduces to {best_sum}.")
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-p",
+        "--part",
+        type=str,
+        choices=["one", "two", "all"],
+        default="all",
+    )
     parser.add_argument("input_file", type=argparse.FileType())
     args = parser.parse_args()
-    solve_part1(args.input_file)
+    if args.part == "one" or args.part == "all":
+        solve_part1(args.input_file)
+    elif args.part == "two" or args.part == "all":
+        solve_part2(args.input_file)
 
 if __name__ == "__main__":
     main()
